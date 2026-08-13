@@ -126,4 +126,28 @@ npm run test:auth
 npm run test:consent
 npm run test:gateway
 npm run test:integration
+npm run test:security
 ```
+
+### Running Demo Scenarios
+
+Automated end-to-end demo scenarios validate all MVP acceptance criteria:
+
+```bash
+# Run all demo scenarios
+npm run demo:all
+
+# Run individual scenarios
+npm run demo:happy-path           # Scenario A: Happy path (200 OK)
+npm run demo:no-consent           # Scenario B: No consent (403 Forbidden)
+npm run demo:revoked-consent      # Scenario C: Revoked consent (403 Forbidden)
+npm run demo:wrong-scope          # Scenario D: Wrong scope (403 Forbidden)
+npm run demo:expired-token        # Scenario E: Expired token (401 Unauthorized)
+npm run demo:rate-limit           # Scenario F: Rate limit (429 Too Many Requests)
+npm run demo:credential-protection # Scenario G: Credential protection
+
+# List all available scenarios
+npm run demo:list
+```
+
+**See [`DEMO_GUIDE.md`](./DEMO_GUIDE.md) for complete demo documentation.**

@@ -1,0 +1,37 @@
+{
+  "name": "openbanking-demo-scenarios",
+  "version": "1.0.0",
+  "description": "Automated end-to-end demo scenarios for Open Banking MVP",
+  "private": true,
+  "scripts": {
+    "demo:all": "node run-all-demos.js",
+    "demo:list": "node run-all-demos.js --list",
+    "demo:a": "node scenario-a-happy-path.js",
+    "demo:b": "node scenario-b-no-consent.js",
+    "demo:c": "node scenario-c-revoked-consent.js",
+    "demo:d": "node scenario-d-wrong-scope.js",
+    "demo:e": "node scenario-e-expired-token.js",
+    "demo:f": "node scenario-f-rate-limit.js",
+    "demo:g": "node scenario-g-credential-protection.js",
+    "demo:happy-path": "node scenario-a-happy-path.js",
+    "demo:no-consent": "node scenario-b-no-consent.js",
+    "demo:revoked-consent": "node scenario-c-revoked-consent.js",
+    "demo:wrong-scope": "node scenario-d-wrong-scope.js",
+    "demo:expired-token": "node scenario-e-expired-token.js",
+    "demo:rate-limit": "node scenario-f-rate-limit.js",
+    "demo:credential-protection": "node scenario-g-credential-protection.js"
+  },
+  "keywords": [
+    "open-banking",
+    "demo",
+    "oauth2",
+    "testing",
+    "scenarios"
+  ],
+  "author": "Open Banking Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "chalk": "^4.1.2"
+  }
+}
