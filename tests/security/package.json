@@ -1,0 +1,36 @@
+{
+  "name": "@openbanking/security-tests",
+  "version": "1.0.0",
+  "description": "Security boundary tests for Open Banking MVP",
+  "private": true,
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "../../coverage/security",
+    "collectCoverageFrom": [
+      "../../gateway/policies/**/*.js",
+      "../../auth/oauth/**/*.js",
+      "../../auth/consent/**/*.js",
+      "!**/*.test.js",
+      "!**/node_modules/**"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "jsonwebtoken": "^9.0.2"
+  }
+}
