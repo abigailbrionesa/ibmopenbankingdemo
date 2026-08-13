@@ -1,0 +1,39 @@
+{
+  "name": "@openbanking/oauth",
+  "version": "1.0.0",
+  "description": "OAuth 2.0 authentication and client registration for Open Banking MVP",
+  "main": "client-registration.js",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "keywords": [
+    "oauth",
+    "oauth2",
+    "client-registration",
+    "open-banking"
+  ],
+  "author": "Open Banking Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "bcrypt": "^5.1.1",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage",
+    "collectCoverageFrom": [
+      "*.js",
+      "!*.test.js"
+    ],
+    "testMatch": [
+      "**/*.test.js"
+    ]
+  }
+}
