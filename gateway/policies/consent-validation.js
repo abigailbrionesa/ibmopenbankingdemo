@@ -1,13 +1,16 @@
 /**
  * Consent Validation Policy
  * Gateway middleware to validate consent status before allowing API access
- * 
+ *
  * This policy ensures that even with a valid OAuth token, API access is blocked
  * if the underlying consent has been revoked or expired.
  */
 
 const { query } = require('../../data/db');
 const { logDeniedRequest, DENIAL_REASONS } = require('./audit-logger');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('consent-validation');
 
 /**
  * Validate consent status for API request
@@ -20,11 +23,19 @@ const { logDeniedRequest, DENIAL_REASONS } = require('./audit-logger');
  * @param {Function} next - Express next middleware function
  */
 async function validateConsent(req, res, next) {
+  const requestLogger = req.logger ? req.logger.child('consent-validation') : logger;
+  const endTimer = requestLogger.startTimer();
+  
   try {
     // Extract token payload (should be set by prior OAuth middleware)
     const tokenPayload = req.oauth_token;
     
     if (!tokenPayload) {
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'missing_token',
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.MISSING_TOKEN, 401);
       return res.status(401).json({
         error: 'unauthorized',
@@ -35,7 +46,13 @@ async function validateConsent(req, res, next) {
     const { customer_id, client_id, consent_id } = tokenPayload;
     
     if (!consent_id) {
-      // Token doesn't have consent_id (legacy or malformed)
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'missing_consent_id',
+        customer_id,
+        client_id,
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.MISSING_CONSENT, 403);
       return res.status(403).json({
         error: 'forbidden',
@@ -52,6 +69,14 @@ async function validateConsent(req, res, next) {
     );
     
     if (consentResult.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'consent_not_found',
+        consent_id,
+        customer_id,
+        client_id,
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.MISSING_CONSENT, 403, {
         consent_id: consent_id
       });
@@ -66,6 +91,14 @@ async function validateConsent(req, res, next) {
     
     // Check consent status
     if (consent.status === 'revoked') {
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'consent_revoked',
+        consent_id,
+        customer_id,
+        client_id,
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.REVOKED_CONSENT, 403, {
         consent_id: consent_id,
         consent_status: 'revoked'
@@ -79,6 +112,14 @@ async function validateConsent(req, res, next) {
     }
     
     if (consent.status === 'denied') {
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'consent_denied',
+        consent_id,
+        customer_id,
+        client_id,
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.DENIED_CONSENT, 403, {
         consent_id: consent_id,
         consent_status: 'denied'
@@ -92,6 +133,15 @@ async function validateConsent(req, res, next) {
     }
     
     if (consent.status === 'expired') {
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'consent_expired',
+        consent_id,
+        customer_id,
+        client_id,
+        expires_at: consent.expires_at,
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.EXPIRED_CONSENT, 403, {
         consent_id: consent_id,
         consent_status: 'expired'
@@ -105,6 +155,15 @@ async function validateConsent(req, res, next) {
     }
     
     if (consent.status !== 'approved') {
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'consent_not_approved',
+        consent_id,
+        customer_id,
+        client_id,
+        consent_status: consent.status,
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.MISSING_CONSENT, 403, {
         consent_id: consent_id,
         consent_status: consent.status
@@ -128,6 +187,16 @@ async function validateConsent(req, res, next) {
         ['expired', consent_id]
       );
       
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'consent_expired_now',
+        consent_id,
+        customer_id,
+        client_id,
+        expired_at: consent.expires_at,
+        latency_ms: latency
+      });
+      
       await logDeniedRequest(req, DENIAL_REASONS.EXPIRED_CONSENT, 403, {
         consent_id: consent_id,
         expired_at: consent.expires_at
@@ -149,6 +218,17 @@ async function validateConsent(req, res, next) {
     const unauthorizedScopes = tokenScopes.filter(scope => !consentScopes.includes(scope));
     
     if (unauthorizedScopes.length > 0) {
+      const latency = endTimer();
+      requestLogger.logConsent('validation_failure', {
+        reason: 'scope_mismatch',
+        consent_id,
+        customer_id,
+        client_id,
+        unauthorized_scopes: unauthorizedScopes,
+        token_scopes: tokenScopes,
+        consent_scopes: consentScopes,
+        latency_ms: latency
+      });
       await logDeniedRequest(req, DENIAL_REASONS.SCOPE_MISMATCH, 403, {
         consent_id: consent_id,
         unauthorized_scopes: unauthorizedScopes,
@@ -167,9 +247,25 @@ async function validateConsent(req, res, next) {
     // Attach consent to request for downstream use
     req.consent = consent;
     
+    const latency = endTimer();
+    requestLogger.logConsent('validation_success', {
+      consent_id,
+      customer_id,
+      client_id,
+      granted_scopes: consentScopes,
+      expires_at: consent.expires_at,
+      latency_ms: latency
+    });
+    
     next();
   } catch (error) {
-    console.error('Consent validation error:', error);
+    const latency = endTimer();
+    requestLogger.error('Consent validation error', error, {
+      customer_id: req.oauth_token?.customer_id,
+      client_id: req.oauth_token?.client_id,
+      consent_id: req.oauth_token?.consent_id,
+      latency_ms: latency
+    });
     await logDeniedRequest(req, DENIAL_REASONS.UNAUTHORIZED, 500, {
       error: error.message
     });

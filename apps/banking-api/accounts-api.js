@@ -6,6 +6,9 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../../data/db');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('banking-api');
 
 /**
  * GET /api/v1/accounts
@@ -14,9 +17,17 @@ const { query } = require('../../data/db');
  * Required scope: accounts:read
  */
 router.get('/', async (req, res) => {
+  const requestLogger = req.logger ? req.logger.child('get-accounts') : logger.child('get-accounts');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     // Customer ID is set by OAuth middleware
     const customer_id = req.oauth_token.customer_id;
+    
+    requestLogger.info('Fetching accounts', {
+      customer_id,
+      client_id: req.oauth_token.client_id
+    });
     
     // Fetch accounts for this customer
     const result = await query(
@@ -62,13 +73,25 @@ router.get('/', async (req, res) => {
       })
     );
     
+    const latency = endTimer();
+    requestLogger.logApiCall('GET', '/api/v1/accounts', 200, latency, {
+      customer_id,
+      client_id: req.oauth_token.client_id,
+      account_count: accounts.length
+    });
+    
     res.json({
       accounts: accounts,
       total: accounts.length
     });
     
   } catch (error) {
-    console.error('Get accounts error:', error);
+    const latency = endTimer();
+    requestLogger.error('Get accounts error', error, {
+      customer_id: req.oauth_token?.customer_id,
+      client_id: req.oauth_token?.client_id,
+      latency_ms: latency
+    });
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to retrieve accounts'
@@ -83,9 +106,18 @@ router.get('/', async (req, res) => {
  * Required scope: accounts:read
  */
 router.get('/:account_id', async (req, res) => {
+  const requestLogger = req.logger ? req.logger.child('get-account') : logger.child('get-account');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     const customer_id = req.oauth_token.customer_id;
     const { account_id } = req.params;
+    
+    requestLogger.info('Fetching account details', {
+      customer_id,
+      client_id: req.oauth_token.client_id,
+      account_id
+    });
     
     // Fetch account with customer verification
     const result = await query(
@@ -104,6 +136,13 @@ router.get('/:account_id', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.warn('Account not found', {
+        customer_id,
+        client_id: req.oauth_token.client_id,
+        account_id,
+        latency_ms: latency
+      });
       return res.status(404).json({
         error: 'not_found',
         error_description: 'Account not found or does not belong to customer'
@@ -129,6 +168,13 @@ router.get('/:account_id', async (req, res) => {
       [account_id]
     );
     
+    const latency = endTimer();
+    requestLogger.logApiCall('GET', `/api/v1/accounts/${account_id}`, 200, latency, {
+      customer_id,
+      client_id: req.oauth_token.client_id,
+      account_id
+    });
+    
     res.json({
       account_id: account.account_id,
       account_number: maskAccountNumber(account.account_number),
@@ -145,7 +191,13 @@ router.get('/:account_id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get account detail error:', error);
+    const latency = endTimer();
+    requestLogger.error('Get account detail error', error, {
+      customer_id: req.oauth_token?.customer_id,
+      client_id: req.oauth_token?.client_id,
+      account_id: req.params.account_id,
+      latency_ms: latency
+    });
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to retrieve account details'
@@ -160,9 +212,18 @@ router.get('/:account_id', async (req, res) => {
  * Required scope: balances:read
  */
 router.get('/:account_id/balance', async (req, res) => {
+  const requestLogger = req.logger ? req.logger.child('get-balance') : logger.child('get-balance');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     const customer_id = req.oauth_token.customer_id;
     const { account_id } = req.params;
+    
+    requestLogger.info('Fetching account balance', {
+      customer_id,
+      client_id: req.oauth_token.client_id,
+      account_id
+    });
     
     // Verify account belongs to customer
     const accountResult = await query(
@@ -171,6 +232,13 @@ router.get('/:account_id/balance', async (req, res) => {
     );
     
     if (accountResult.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.warn('Account not found for balance', {
+        customer_id,
+        client_id: req.oauth_token.client_id,
+        account_id,
+        latency_ms: latency
+      });
       return res.status(404).json({
         error: 'not_found',
         error_description: 'Account not found'
@@ -190,6 +258,14 @@ router.get('/:account_id/balance', async (req, res) => {
     
     const currentBalance = parseFloat(balanceResult.rows[0].current_balance);
     
+    const latency = endTimer();
+    requestLogger.logApiCall('GET', `/api/v1/accounts/${account_id}/balance`, 200, latency, {
+      customer_id,
+      client_id: req.oauth_token.client_id,
+      account_id,
+      balance: currentBalance
+    });
+    
     res.json({
       account_id: account.account_id,
       currency: account.currency,
@@ -201,7 +277,13 @@ router.get('/:account_id/balance', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get balance error:', error);
+    const latency = endTimer();
+    requestLogger.error('Get balance error', error, {
+      customer_id: req.oauth_token?.customer_id,
+      client_id: req.oauth_token?.client_id,
+      account_id: req.params.account_id,
+      latency_ms: latency
+    });
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to retrieve balance'
@@ -216,6 +298,9 @@ router.get('/:account_id/balance', async (req, res) => {
  * Required scope: transactions:read
  */
 router.get('/:account_id/transactions', async (req, res) => {
+  const requestLogger = req.logger ? req.logger.child('get-transactions') : logger.child('get-transactions');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     const customer_id = req.oauth_token.customer_id;
     const { account_id } = req.params;
@@ -226,6 +311,16 @@ router.get('/:account_id/transactions', async (req, res) => {
     const from_date = req.query.from_date;
     const to_date = req.query.to_date;
     
+    requestLogger.info('Fetching transactions', {
+      customer_id,
+      client_id: req.oauth_token.client_id,
+      account_id,
+      limit,
+      offset,
+      from_date,
+      to_date
+    });
+    
     // Verify account belongs to customer
     const accountResult = await query(
       'SELECT account_id FROM accounts WHERE account_id = $1 AND customer_id = $2',
@@ -233,6 +328,13 @@ router.get('/:account_id/transactions', async (req, res) => {
     );
     
     if (accountResult.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.warn('Account not found for transactions', {
+        customer_id,
+        client_id: req.oauth_token.client_id,
+        account_id,
+        latency_ms: latency
+      });
       return res.status(404).json({
         error: 'not_found',
         error_description: 'Account not found'
@@ -312,6 +414,17 @@ router.get('/:account_id/transactions', async (req, res) => {
       status: tx.status
     }));
     
+    const latency = endTimer();
+    requestLogger.logApiCall('GET', `/api/v1/accounts/${account_id}/transactions`, 200, latency, {
+      customer_id,
+      client_id: req.oauth_token.client_id,
+      account_id,
+      transaction_count: transactions.length,
+      total_transactions: total,
+      limit,
+      offset
+    });
+    
     res.json({
       transactions: transactions,
       pagination: {
@@ -323,7 +436,13 @@ router.get('/:account_id/transactions', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get transactions error:', error);
+    const latency = endTimer();
+    requestLogger.error('Get transactions error', error, {
+      customer_id: req.oauth_token?.customer_id,
+      client_id: req.oauth_token?.client_id,
+      account_id: req.params.account_id,
+      latency_ms: latency
+    });
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to retrieve transactions'

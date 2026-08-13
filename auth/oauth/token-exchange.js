@@ -7,6 +7,9 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const { query } = require('../../data/db');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('token-exchange');
 
 /**
  * Token configuration
@@ -43,9 +46,24 @@ function getJwtSecret() {
  */
 async function exchangeAuthorizationCode(params) {
   const { grant_type, code, redirect_uri, client_id, client_secret } = params;
+  const requestLogger = logger.child('exchange-code');
+  const endTimer = requestLogger.startTimer();
+  
+  requestLogger.logAuthz('token_exchange_attempt', {
+    grant_type,
+    client_id,
+    redirect_uri
+  });
   
   // Validate grant_type
   if (grant_type !== 'authorization_code') {
+    const latency = endTimer();
+    requestLogger.logAuthz('token_exchange_failure', {
+      reason: 'unsupported_grant_type',
+      grant_type,
+      client_id,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'unsupported_grant_type',
@@ -55,6 +73,12 @@ async function exchangeAuthorizationCode(params) {
   
   // Validate required parameters
   if (!code || !redirect_uri || !client_id || !client_secret) {
+    const latency = endTimer();
+    requestLogger.logAuthz('token_exchange_failure', {
+      reason: 'missing_parameters',
+      client_id,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'invalid_request',
@@ -63,8 +87,15 @@ async function exchangeAuthorizationCode(params) {
   }
   
   // Step 1: Validate client credentials
-  const clientValidation = await validateClientCredentials(client_id, client_secret);
+  const clientValidation = await validateClientCredentials(client_id, client_secret, requestLogger);
   if (!clientValidation.valid) {
+    const latency = endTimer();
+    requestLogger.logAuthz('token_exchange_failure', {
+      reason: 'client_validation_failed',
+      error: clientValidation.error,
+      client_id,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: clientValidation.error,
@@ -75,8 +106,16 @@ async function exchangeAuthorizationCode(params) {
   const client = clientValidation.client;
   
   // Step 2: Validate authorization code
-  const codeValidation = await validateAuthorizationCode(code, client_id, redirect_uri);
+  const codeValidation = await validateAuthorizationCode(code, client_id, redirect_uri, requestLogger);
   if (!codeValidation.valid) {
+    const latency = endTimer();
+    requestLogger.logAuthz('token_exchange_failure', {
+      reason: 'code_validation_failed',
+      error: codeValidation.error,
+      client_id,
+      security_violation: codeValidation.security_violation,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: codeValidation.error,
@@ -95,11 +134,29 @@ async function exchangeAuthorizationCode(params) {
     client_id: authCode.client_id,
     consent_id: authCode.consent_id,
     scope: authCode.scope
-  });
+  }, requestLogger);
   
   if (!tokenResult.success) {
+    const latency = endTimer();
+    requestLogger.logAuthz('token_exchange_failure', {
+      reason: 'token_generation_failed',
+      error: tokenResult.error,
+      client_id,
+      customer_id: authCode.customer_id,
+      latency_ms: latency
+    });
     return tokenResult;
   }
+  
+  const latency = endTimer();
+  requestLogger.logAuthz('token_exchange_success', {
+    client_id,
+    customer_id: authCode.customer_id,
+    consent_id: authCode.consent_id,
+    scope: authCode.scope,
+    token_id: tokenResult.token_id,
+    latency_ms: latency
+  });
   
   // Step 5: Return token response
   return {
@@ -119,7 +176,10 @@ async function exchangeAuthorizationCode(params) {
  * @param {string} client_secret - Client secret
  * @returns {Promise<Object>} Validation result
  */
-async function validateClientCredentials(client_id, client_secret) {
+async function validateClientCredentials(client_id, client_secret, parentLogger = null) {
+  const requestLogger = parentLogger ? parentLogger.child('validate-client') : logger.child('validate-client');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     // Fetch client from database
     const result = await query(
@@ -128,6 +188,12 @@ async function validateClientCredentials(client_id, client_secret) {
     );
     
     if (result.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.logAuthz('client_validation_failure', {
+        reason: 'client_not_found',
+        client_id,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_client',
@@ -139,6 +205,13 @@ async function validateClientCredentials(client_id, client_secret) {
     
     // Check client status
     if (client.status !== 'active') {
+      const latency = endTimer();
+      requestLogger.logAuthz('client_validation_failure', {
+        reason: 'client_inactive',
+        client_id,
+        client_status: client.status,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'unauthorized_client',
@@ -150,6 +223,12 @@ async function validateClientCredentials(client_id, client_secret) {
     const secretValid = await bcrypt.compare(client_secret, client.client_secret_hash);
     
     if (!secretValid) {
+      const latency = endTimer();
+      requestLogger.logAuthz('client_validation_failure', {
+        reason: 'invalid_secret',
+        client_id,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_client',
@@ -157,12 +236,22 @@ async function validateClientCredentials(client_id, client_secret) {
       };
     }
     
+    const latency = endTimer();
+    requestLogger.logAuthz('client_validation_success', {
+      client_id,
+      latency_ms: latency
+    });
+    
     return {
       valid: true,
       client: client
     };
   } catch (error) {
-    console.error('Client validation error:', error);
+    const latency = endTimer();
+    requestLogger.error('Client validation error', error, {
+      client_id,
+      latency_ms: latency
+    });
     return {
       valid: false,
       error: 'server_error',
@@ -179,7 +268,10 @@ async function validateClientCredentials(client_id, client_secret) {
  * @param {string} redirect_uri - Redirect URI
  * @returns {Promise<Object>} Validation result
  */
-async function validateAuthorizationCode(code, client_id, redirect_uri) {
+async function validateAuthorizationCode(code, client_id, redirect_uri, parentLogger = null) {
+  const requestLogger = parentLogger ? parentLogger.child('validate-code') : logger.child('validate-code');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     // Fetch authorization code from database
     const result = await query(
@@ -191,6 +283,12 @@ async function validateAuthorizationCode(code, client_id, redirect_uri) {
     );
     
     if (result.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.logAuthz('code_validation_failure', {
+        reason: 'code_not_found',
+        client_id,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_grant',
@@ -206,6 +304,15 @@ async function validateAuthorizationCode(code, client_id, redirect_uri) {
       // Revoke all tokens associated with this code
       await revokeTokensByCode(code);
       
+      const latency = endTimer();
+      requestLogger.warn('Code reuse detected - security violation', {
+        client_id,
+        customer_id: authCode.customer_id,
+        consent_id: authCode.consent_id,
+        used_at: authCode.used_at,
+        latency_ms: latency
+      });
+      
       return {
         valid: false,
         error: 'invalid_grant',
@@ -219,6 +326,14 @@ async function validateAuthorizationCode(code, client_id, redirect_uri) {
     const expiresAt = new Date(authCode.expires_at);
     
     if (now > expiresAt) {
+      const latency = endTimer();
+      requestLogger.logAuthz('code_validation_failure', {
+        reason: 'code_expired',
+        client_id,
+        customer_id: authCode.customer_id,
+        expired_at: authCode.expires_at,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_grant',
@@ -228,6 +343,12 @@ async function validateAuthorizationCode(code, client_id, redirect_uri) {
     
     // Verify client_id matches
     if (authCode.client_id !== client_id) {
+      const latency = endTimer();
+      requestLogger.warn('Client ID mismatch - security violation', {
+        expected_client_id: authCode.client_id,
+        provided_client_id: client_id,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_grant',
@@ -237,6 +358,13 @@ async function validateAuthorizationCode(code, client_id, redirect_uri) {
     
     // Verify redirect_uri matches
     if (authCode.redirect_uri !== redirect_uri) {
+      const latency = endTimer();
+      requestLogger.warn('Redirect URI mismatch - security violation', {
+        expected_redirect_uri: authCode.redirect_uri,
+        provided_redirect_uri: redirect_uri,
+        client_id,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_grant',
@@ -244,12 +372,25 @@ async function validateAuthorizationCode(code, client_id, redirect_uri) {
       };
     }
     
+    const latency = endTimer();
+    requestLogger.logAuthz('code_validation_success', {
+      client_id,
+      customer_id: authCode.customer_id,
+      consent_id: authCode.consent_id,
+      scope: authCode.scope,
+      latency_ms: latency
+    });
+    
     return {
       valid: true,
       authorization_code: authCode
     };
   } catch (error) {
-    console.error('Authorization code validation error:', error);
+    const latency = endTimer();
+    requestLogger.error('Authorization code validation error', error, {
+      client_id,
+      latency_ms: latency
+    });
     return {
       valid: false,
       error: 'server_error',
@@ -281,7 +422,10 @@ async function markCodeAsUsed(code) {
  * @param {string} params.scope - Space-separated scopes
  * @returns {Promise<Object>} Generated tokens
  */
-async function generateTokens(params) {
+async function generateTokens(params, parentLogger = null) {
+  const requestLogger = parentLogger ? parentLogger.child('generate-tokens') : logger.child('generate-tokens');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     const { customer_id, client_id, consent_id, scope } = params;
     
@@ -340,6 +484,17 @@ async function generateTokens(params) {
       ]
     );
     
+    const latency = endTimer();
+    requestLogger.logAuthz('token_generation_success', {
+      token_id,
+      customer_id,
+      client_id,
+      consent_id,
+      scope,
+      expires_in: TOKEN_CONFIG.ACCESS_TOKEN_TTL,
+      latency_ms: latency
+    });
+    
     return {
       success: true,
       access_token: accessToken,
@@ -347,7 +502,12 @@ async function generateTokens(params) {
       token_id: token_id
     };
   } catch (error) {
-    console.error('Token generation error:', error);
+    const latency = endTimer();
+    requestLogger.error('Token generation error', error, {
+      customer_id: params.customer_id,
+      client_id: params.client_id,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'server_error',
@@ -383,9 +543,12 @@ async function revokeTokensByCode(code) {
       [consent_id]
     );
     
-    console.warn(`Security violation: Authorization code reuse detected. All tokens for consent ${consent_id} have been revoked.`);
+    logger.warn('Security violation: Authorization code reuse detected', {
+      consent_id,
+      revoked_tokens: true
+    });
   } catch (error) {
-    console.error('Token revocation error:', error);
+    logger.error('Token revocation error', error, { code });
   }
 }
 
@@ -396,6 +559,9 @@ async function revokeTokensByCode(code) {
  * @returns {Promise<Object>} Verification result
  */
 async function verifyAccessToken(accessToken) {
+  const requestLogger = logger.child('verify-token');
+  const endTimer = requestLogger.startTimer();
+  
   try {
     // Verify JWT signature and expiration
     const payload = jwt.verify(accessToken, getJwtSecret(), {
@@ -415,6 +581,11 @@ async function verifyAccessToken(accessToken) {
     );
     
     if (result.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.logAuthz('token_verification_failure', {
+        reason: 'token_not_found',
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_token',
@@ -426,6 +597,14 @@ async function verifyAccessToken(accessToken) {
     
     // Check if token is revoked
     if (token.revoked) {
+      const latency = endTimer();
+      requestLogger.logAuthz('token_verification_failure', {
+        reason: 'token_revoked',
+        token_id: token.token_id,
+        customer_id: token.customer_id,
+        client_id: token.client_id,
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_token',
@@ -439,13 +618,30 @@ async function verifyAccessToken(accessToken) {
       [token.token_id]
     );
     
+    const latency = endTimer();
+    requestLogger.logAuthz('token_verification_success', {
+      token_id: token.token_id,
+      customer_id: token.customer_id,
+      client_id: token.client_id,
+      consent_id: token.consent_id,
+      scope: token.scope,
+      use_count: token.use_count + 1,
+      latency_ms: latency
+    });
+    
     return {
       valid: true,
       payload: payload,
       token: token
     };
   } catch (error) {
+    const latency = endTimer();
+    
     if (error.name === 'TokenExpiredError') {
+      requestLogger.logAuthz('token_verification_failure', {
+        reason: 'token_expired',
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_token',
@@ -454,6 +650,10 @@ async function verifyAccessToken(accessToken) {
     }
     
     if (error.name === 'JsonWebTokenError') {
+      requestLogger.logAuthz('token_verification_failure', {
+        reason: 'invalid_signature',
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'invalid_token',
@@ -461,7 +661,9 @@ async function verifyAccessToken(accessToken) {
       };
     }
     
-    console.error('Token verification error:', error);
+    requestLogger.error('Token verification error', error, {
+      latency_ms: latency
+    });
     return {
       valid: false,
       error: 'server_error',

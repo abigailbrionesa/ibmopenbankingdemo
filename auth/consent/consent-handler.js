@@ -13,6 +13,9 @@ const {
   findActiveConsent
 } = require('./consent-manager');
 const { query } = require('../../data/db');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('consent-handler');
 
 /**
  * Handle consent page request
@@ -23,6 +26,14 @@ const { query } = require('../../data/db');
  * @returns {Promise<Object>} Consent page data
  */
 async function handleConsentPageRequest(auth_request_id, customer_id) {
+  const requestLogger = logger.child('consent-page');
+  const endTimer = requestLogger.startTimer();
+  
+  requestLogger.logConsent('page_request', {
+    auth_request_id,
+    customer_id
+  });
+  
   // Fetch authorization request
   const authRequestResult = await query(
     'SELECT * FROM authorization_requests WHERE auth_request_id = $1 AND customer_id = $2',
@@ -30,6 +41,13 @@ async function handleConsentPageRequest(auth_request_id, customer_id) {
   );
 
   if (authRequestResult.rows.length === 0) {
+    const latency = endTimer();
+    requestLogger.logConsent('page_request_failure', {
+      reason: 'auth_request_not_found',
+      auth_request_id,
+      customer_id,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'invalid_request',
@@ -41,6 +59,14 @@ async function handleConsentPageRequest(auth_request_id, customer_id) {
 
   // Check if authorization request has expired
   if (new Date() > new Date(authRequest.expires_at)) {
+    const latency = endTimer();
+    requestLogger.logConsent('page_request_failure', {
+      reason: 'auth_request_expired',
+      auth_request_id,
+      customer_id,
+      expired_at: authRequest.expires_at,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'expired_request',
@@ -90,6 +116,16 @@ async function handleConsentPageRequest(auth_request_id, customer_id) {
     requested_scopes
   );
 
+  const latency = endTimer();
+  requestLogger.logConsent('page_request_success', {
+    auth_request_id,
+    customer_id,
+    client_id: client.client_id,
+    requested_scopes: requested_scopes,
+    has_existing_consent: !!existingConsent,
+    latency_ms: latency
+  });
+
   return {
     success: true,
     auth_request_id: auth_request_id,
@@ -133,9 +169,24 @@ async function handleConsentPageRequest(auth_request_id, customer_id) {
  */
 async function handleConsentDecision(params, customer_id, ip_address = null, user_agent = null) {
   const { auth_request_id, action, granted_scopes } = params;
+  const requestLogger = logger.child('consent-decision');
+  const endTimer = requestLogger.startTimer();
+
+  requestLogger.logConsent('decision_attempt', {
+    auth_request_id,
+    customer_id,
+    action,
+    ip_address
+  });
 
   // Validate action
   if (!['approve', 'deny'].includes(action)) {
+    const latency = endTimer();
+    requestLogger.logConsent('decision_failure', {
+      reason: 'invalid_action',
+      action,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'invalid_request',
@@ -150,6 +201,13 @@ async function handleConsentDecision(params, customer_id, ip_address = null, use
   );
 
   if (authRequestResult.rows.length === 0) {
+    const latency = endTimer();
+    requestLogger.logConsent('decision_failure', {
+      reason: 'auth_request_not_found',
+      auth_request_id,
+      customer_id,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'invalid_request',
@@ -181,6 +239,16 @@ async function handleConsentDecision(params, customer_id, ip_address = null, use
   const purpose = `${client.name} - ${client.description || 'Access to banking data'}`;
 
   if (action === 'deny') {
+    const latency = endTimer();
+    requestLogger.logConsent('consent_denied', {
+      auth_request_id,
+      customer_id,
+      client_id: authRequest.client_id,
+      requested_scopes: authRequest.scope.split(' '),
+      ip_address,
+      latency_ms: latency
+    });
+    
     // Create denied consent record
     const consent = await createConsent({
       customer_id: customer_id,
@@ -279,6 +347,18 @@ async function handleConsentDecision(params, customer_id, ip_address = null, use
   // Delete authorization request (single use)
   await query('DELETE FROM authorization_requests WHERE auth_request_id = $1', [auth_request_id]);
 
+  const latency = endTimer();
+  requestLogger.logConsent('consent_approved', {
+    auth_request_id,
+    customer_id,
+    client_id: authRequest.client_id,
+    consent_id: consent.consent_id,
+    granted_scopes: consent.granted_scopes.split(' '),
+    reused_existing: !!existingConsent,
+    ip_address,
+    latency_ms: latency
+  });
+
   return {
     success: true,
     code: auth_code,
@@ -298,11 +378,27 @@ async function handleConsentDecision(params, customer_id, ip_address = null, use
  * @returns {Promise<Object>} Result of revocation
  */
 async function handleConsentRevocation(consent_id, customer_id, reason = null) {
+  const requestLogger = logger.child('revoke-consent');
+  const endTimer = requestLogger.startTimer();
+  
+  requestLogger.logConsent('revocation_attempt', {
+    consent_id,
+    customer_id,
+    reason
+  });
+  
   try {
     // Verify consent belongs to customer
     const consent = await getConsent(consent_id, customer_id);
     
     if (!consent) {
+      const latency = endTimer();
+      requestLogger.logConsent('revocation_failure', {
+        reason: 'consent_not_found',
+        consent_id,
+        customer_id,
+        latency_ms: latency
+      });
       return {
         success: false,
         error: 'not_found',
@@ -321,12 +417,28 @@ async function handleConsentRevocation(consent_id, customer_id, reason = null) {
       [consent_id]
     );
 
+    const latency = endTimer();
+    requestLogger.logConsent('revocation_success', {
+      consent_id,
+      customer_id,
+      client_id: consent.client_id,
+      revoked_at: revokedConsent.revoked_at,
+      revocation_reason: reason,
+      latency_ms: latency
+    });
+
     return {
       success: true,
       consent_id: revokedConsent.consent_id,
       revoked_at: revokedConsent.revoked_at
     };
   } catch (error) {
+    const latency = endTimer();
+    requestLogger.error('Consent revocation error', error, {
+      consent_id,
+      customer_id,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'revocation_failed',

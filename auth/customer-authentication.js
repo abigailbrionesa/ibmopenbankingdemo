@@ -8,6 +8,9 @@
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
+const { createLogger } = require('../utils/logger');
+
+const logger = createLogger('customer-authentication');
 
 // Session configuration
 const SESSION_DURATION_MINUTES = 30;
@@ -44,8 +47,22 @@ function generateSessionId() {
  */
 async function authenticateCustomer(credentials) {
   const { email, password, ip_address, user_agent } = credentials;
+  const requestLogger = logger.child('authenticate');
+  const endTimer = requestLogger.startTimer();
+  
+  requestLogger.logAuth('login_attempt', {
+    email,
+    ip_address,
+    user_agent
+  });
   
   if (!email || !password) {
+    const latency = endTimer();
+    requestLogger.logAuth('login_failure', {
+      reason: 'missing_credentials',
+      email,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'Email and password are required'
@@ -71,6 +88,12 @@ async function authenticateCustomer(credentials) {
     const customerResult = await pool.query(customerQuery, [email]);
     
     if (customerResult.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.logAuth('login_failure', {
+        reason: 'customer_not_found',
+        email,
+        latency_ms: latency
+      });
       return {
         success: false,
         error: 'Invalid credentials'
@@ -84,6 +107,13 @@ async function authenticateCustomer(credentials) {
     const isDemoPassword = password === 'demo123' || password === customer.customer_id;
     
     if (!isDemoPassword) {
+      const latency = endTimer();
+      requestLogger.logAuth('login_failure', {
+        reason: 'invalid_password',
+        customer_id: customer.customer_id,
+        email,
+        latency_ms: latency
+      });
       return {
         success: false,
         error: 'Invalid credentials'
@@ -120,6 +150,15 @@ async function authenticateCustomer(credentials) {
     
     const sessionResult = await pool.query(sessionQuery, sessionValues);
     
+    const latency = endTimer();
+    requestLogger.logAuth('login_success', {
+      customer_id: customer.customer_id,
+      session_id: sessionId,
+      ip_address,
+      authentication_method: 'demo',
+      latency_ms: latency
+    });
+    
     return {
       success: true,
       customer_id: customer.customer_id,
@@ -130,7 +169,11 @@ async function authenticateCustomer(credentials) {
       warning: 'DEMO AUTHENTICATION - Not SCA compliant'
     };
   } catch (error) {
-    console.error('Authentication error:', error);
+    const latency = endTimer();
+    requestLogger.error('Authentication error', error, {
+      email,
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'Authentication failed'
@@ -146,7 +189,15 @@ async function authenticateCustomer(credentials) {
  * @returns {Promise<Object>} Verification result
  */
 async function verifyCustomerSession(sessionToken) {
+  const requestLogger = logger.child('verify-session');
+  const endTimer = requestLogger.startTimer();
+  
   if (!sessionToken) {
+    const latency = endTimer();
+    requestLogger.logAuth('session_verification_failure', {
+      reason: 'missing_token',
+      latency_ms: latency
+    });
     return {
       valid: false,
       error: 'Session token required'
@@ -183,6 +234,11 @@ async function verifyCustomerSession(sessionToken) {
     const result = await pool.query(query, [sessionToken]);
     
     if (result.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.logAuth('session_verification_failure', {
+        reason: 'session_not_found_or_expired',
+        latency_ms: latency
+      });
       return {
         valid: false,
         error: 'Invalid or expired session'
@@ -197,6 +253,14 @@ async function verifyCustomerSession(sessionToken) {
       [sessionToken]
     );
     
+    const latency = endTimer();
+    requestLogger.logAuth('session_verification_success', {
+      customer_id: session.customer_id,
+      session_id: session.session_id,
+      authentication_method: session.authentication_method,
+      latency_ms: latency
+    });
+    
     return {
       valid: true,
       customer_id: session.customer_id,
@@ -207,7 +271,10 @@ async function verifyCustomerSession(sessionToken) {
       authentication_method: session.authentication_method
     };
   } catch (error) {
-    console.error('Session verification error:', error);
+    const latency = endTimer();
+    requestLogger.error('Session verification error', error, {
+      latency_ms: latency
+    });
     return {
       valid: false,
       error: 'Session verification failed'
@@ -223,7 +290,15 @@ async function verifyCustomerSession(sessionToken) {
  * @returns {Promise<Object>} Logout result
  */
 async function logoutCustomer(sessionToken) {
+  const requestLogger = logger.child('logout');
+  const endTimer = requestLogger.startTimer();
+  
   if (!sessionToken) {
+    const latency = endTimer();
+    requestLogger.logAuth('logout_failure', {
+      reason: 'missing_token',
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'Session token required'
@@ -249,18 +324,32 @@ async function logoutCustomer(sessionToken) {
     const result = await pool.query(query, [sessionToken]);
     
     if (result.rows.length === 0) {
+      const latency = endTimer();
+      requestLogger.logAuth('logout_failure', {
+        reason: 'session_not_found',
+        latency_ms: latency
+      });
       return {
         success: false,
         error: 'Session not found'
       };
     }
     
+    const latency = endTimer();
+    requestLogger.logAuth('logout_success', {
+      session_id: result.rows[0].session_id,
+      latency_ms: latency
+    });
+    
     return {
       success: true,
       message: 'Logged out successfully'
     };
   } catch (error) {
-    console.error('Logout error:', error);
+    const latency = endTimer();
+    requestLogger.error('Logout error', error, {
+      latency_ms: latency
+    });
     return {
       success: false,
       error: 'Logout failed'
