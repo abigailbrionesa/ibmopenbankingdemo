@@ -1,0 +1,53 @@
+{
+  "name": "openbanking-mvp",
+  "version": "1.0.0",
+  "description": "Open Banking MVP - Secure data sharing between financial institutions and third-party applications",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "auth/*",
+    "gateway/*"
+  ],
+  "scripts": {
+    "dev": "docker-compose up",
+    "dev:build": "docker-compose up --build",
+    "dev:down": "docker-compose down",
+    "dev:clean": "docker-compose down -v",
+    "test": "npm run test --workspaces",
+    "test:auth": "npm run test -w auth/oauth && npm run test -w auth/consent",
+    "test:consent": "npm run test -w tests/consent",
+    "test:gateway": "npm run test -w tests/gateway",
+    "test:integration": "npm run test -w tests/integration",
+    "lint": "npm run lint --workspaces",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "db:migrate": "docker-compose exec banking-api npm run db:migrate",
+    "db:seed": "docker-compose exec banking-api npm run db:seed",
+    "db:reset": "docker-compose exec banking-api npm run db:reset",
+    "logs": "docker-compose logs -f",
+    "logs:api": "docker-compose logs -f banking-api",
+    "logs:consent": "docker-compose logs -f customer-consent",
+    "logs:fintech": "docker-compose logs -f fintech-demo",
+    "logs:gateway": "docker-compose logs -f api-gateway"
+  },
+  "keywords": [
+    "open-banking",
+    "oauth2",
+    "api-gateway",
+    "fintech",
+    "consent-management"
+  ],
+  "author": "Open Banking Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "eslint": "^8.55.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

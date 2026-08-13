@@ -1,0 +1,183 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: openbanking-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-openbanking_dev}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./data/schema:/docker-entrypoint-initdb.d
+    networks:
+      - openbanking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for session storage and caching
+  redis:
+    image: redis:7-alpine
+    container_name: openbanking-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - openbanking-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # HashiCorp Vault for secrets management
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: openbanking-vault
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-dev-root-token}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault_data:/vault/data
+      - ./vault/configuration:/vault/config
+    networks:
+      - openbanking-network
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Banking API Service
+  banking-api:
+    build:
+      context: ./apps/banking-api
+      dockerfile: Dockerfile
+    container_name: openbanking-banking-api
+    ports:
+      - "${BANKING_API_PORT:-3002}:3002"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-openbanking_dev}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-devpassword}
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN:-dev-root-token}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    networks:
+      - openbanking-network
+    volumes:
+      - ./apps/banking-api:/app
+      - /app/node_modules
+
+  # Customer Consent Application
+  customer-consent:
+    build:
+      context: ./apps/customer-consent
+      dockerfile: Dockerfile
+    container_name: openbanking-consent
+    ports:
+      - "${CONSENT_APP_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-openbanking_dev}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-devpassword}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN:-dev-root-token}
+      OAUTH_ISSUER: ${OAUTH_ISSUER:-http://localhost:8080/oauth}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    networks:
+      - openbanking-network
+    volumes:
+      - ./apps/customer-consent:/app
+      - /app/node_modules
+
+  # Fintech Demo Application
+  fintech-demo:
+    build:
+      context: ./apps/fintech-demo
+      dockerfile: Dockerfile
+    container_name: openbanking-fintech-demo
+    ports:
+      - "${FINTECH_APP_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      OAUTH_CLIENT_ID: ${FINTECH_CLIENT_ID:-fintech-demo-client}
+      OAUTH_CLIENT_SECRET: ${FINTECH_CLIENT_SECRET:-demo-secret}
+      OAUTH_REDIRECT_URI: ${FINTECH_REDIRECT_URI:-http://localhost:3000/callback}
+      OAUTH_AUTHORIZATION_ENDPOINT: ${OAUTH_AUTHORIZATION_ENDPOINT:-http://localhost:8080/oauth/authorize}
+      OAUTH_TOKEN_ENDPOINT: ${OAUTH_TOKEN_ENDPOINT:-http://localhost:8080/oauth/token}
+      API_GATEWAY_URL: ${GATEWAY_BASE_URL:-http://localhost:8080}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - openbanking-network
+    volumes:
+      - ./apps/fintech-demo:/app
+      - /app/node_modules
+
+  # API Gateway (placeholder - to be implemented)
+  api-gateway:
+    image: nginx:alpine
+    container_name: openbanking-gateway
+    ports:
+      - "${GATEWAY_PORT:-8080}:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/api-definitions:/etc/nginx/api-definitions:ro
+    depends_on:
+      - banking-api
+      - customer-consent
+    networks:
+      - openbanking-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  openbanking-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  vault_data:
+    driver: local
+
+# Made with Bob
