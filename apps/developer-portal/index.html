@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developer Portal - IBM Open Banking</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🏦 IBM Open Banking Developer Portal</h1>
+            <p class="tagline">Build innovative financial applications with our Open Banking APIs</p>
+        </div>
+    </header>
+
+    <nav class="tabs">
+        <div class="container">
+            <button class="tab-button active" data-tab="catalog">API Catalog</button>
+            <button class="tab-button" data-tab="register">Register App</button>
+            <button class="tab-button" data-tab="demo">Try Demo</button>
+            <button class="tab-button" data-tab="docs">Documentation</button>
+        </div>
+    </nav>
+
+    <main class="container">
+        <!-- API Catalog Tab -->
+        <section id="catalog-tab" class="tab-content active">
+            <h2>Available APIs</h2>
+            <p class="section-description">Explore our Open Banking APIs and the scopes required to access them.</p>
+            
+            <div id="api-catalog-loading" class="loading">Loading API catalog...</div>
+            <div id="api-catalog-content" style="display: none;">
+                <div id="apis-list"></div>
+                
+                <h3>Available Scopes</h3>
+                <div id="scopes-list" class="scopes-grid"></div>
+            </div>
+        </section>
+
+        <!-- Register App Tab -->
+        <section id="register-tab" class="tab-content">
+            <h2>Register Your Application</h2>
+            <p class="section-description">Register your fintech application to get OAuth credentials.</p>
+            
+            <form id="registration-form" class="form-card">
+                <div class="form-group">
+                    <label for="app-name">Application Name *</label>
+                    <input type="text" id="app-name" required placeholder="My Fintech App">
+                </div>
+
+                <div class="form-group">
+                    <label for="app-description">Description</label>
+                    <textarea id="app-description" rows="3" placeholder="Brief description of your application"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="redirect-uri">Redirect URI *</label>
+                    <input type="url" id="redirect-uri" required placeholder="http://localhost:3000/callback">
+                    <small>Where users will be redirected after authorization</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="contact-email">Contact Email</label>
+                    <input type="email" id="contact-email" placeholder="developer@example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="website-url">Website URL</label>
+                    <input type="url" id="website-url" placeholder="https://example.com">
+                </div>
+
+                <div class="form-group">
+                    <label>Required Scopes *</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="scope" value="accounts:read" checked>
+                            <span>accounts:read - Read account information</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="scope" value="transactions:read">
+                            <span>transactions:read - Read transaction history</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="scope" value="balances:read">
+                            <span>balances:read - Read account balances</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="scope" value="profile:read">
+                            <span>profile:read - Read customer profile</span>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Register Application</button>
+            </form>
+
+            <div id="registration-result" class="result-card" style="display: none;">
+                <h3>✅ Registration Successful!</h3>
+                <div class="credentials">
+                    <div class="credential-item">
+                        <label>Client ID:</label>
+                        <div class="credential-value">
+                            <code id="result-client-id"></code>
+                            <button class="btn-copy" data-copy="result-client-id">Copy</button>
+                        </div>
+                    </div>
+                    <div class="credential-item">
+                        <label>Client Secret:</label>
+                        <div class="credential-value">
+                            <code id="result-client-secret"></code>
+                            <button class="btn-copy" data-copy="result-client-secret">Copy</button>
+                        </div>
+                    </div>
+                    <div class="warning-box">
+                        <strong>⚠️ Important:</strong> Store your client secret securely. It will not be shown again.
+                        Never expose it in client-side code or public repositories.
+                    </div>
+                </div>
+                <button class="btn btn-secondary" onclick="location.reload()">Register Another App</button>
+            </div>
+        </section>
+
+        <!-- Demo Tab -->
+        <section id="demo-tab" class="tab-content">
+            <h2>Try the Demo Flow</h2>
+            <p class="section-description">Experience the complete OAuth flow from registration to API access.</p>
+            
+            <div class="demo-steps">
+                <div class="step-card">
+                    <div class="step-number">1</div>
+                    <h3>Register Application</h3>
+                    <p>First, register your application in the "Register App" tab to get credentials.</p>
+                    <div id="demo-credentials-input" class="form-group">
+                        <label for="demo-client-id">Client ID:</label>
+                        <input type="text" id="demo-client-id" placeholder="client_abc123...">
+                        <label for="demo-client-secret">Client Secret:</label>
+                        <input type="password" id="demo-client-secret" placeholder="Your client secret">
+                        <button class="btn btn-secondary" id="save-demo-credentials">Save Credentials</button>
+                    </div>
+                    <div id="demo-credentials-saved" style="display: none;" class="success-message">
+                        ✅ Credentials saved for demo
+                    </div>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number">2</div>
+                    <h3>Start Authorization</h3>
+                    <p>Initiate the OAuth authorization flow to get customer consent.</p>
+                    <button class="btn btn-primary" id="start-authorization" disabled>Start Authorization Flow</button>
+                    <div id="auth-url-display" style="display: none;" class="code-block">
+                        <p>Authorization URL:</p>
+                        <code id="auth-url"></code>
+                        <button class="btn-copy" data-copy="auth-url">Copy URL</button>
+                    </div>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number">3</div>
+                    <h3>Exchange Code for Token</h3>
+                    <p>After customer authorizes, exchange the authorization code for an access token.</p>
+                    <div class="form-group">
+                        <label for="auth-code">Authorization Code:</label>
+                        <input type="text" id="auth-code" placeholder="Paste code from callback URL">
+                        <button class="btn btn-primary" id="exchange-token" disabled>Exchange for Token</button>
+                    </div>
+                    <div id="token-display" style="display: none;" class="code-block">
+                        <p>Access Token:</p>
+                        <code id="access-token"></code>
+                        <button class="btn-copy" data-copy="access-token">Copy Token</button>
+                    </div>
+                </div>
+
+                <div class="step-card">
+                    <div class="step-number">4</div>
+                    <h3>Call Protected API</h3>
+                    <p>Use your access token to call the protected Banking API.</p>
+                    <select id="api-endpoint" class="form-control">
+                        <option value="/api/v1/accounts">GET /api/v1/accounts</option>
+                        <option value="/api/v1/accounts/acc-001">GET /api/v1/accounts/{id}</option>
+                        <option value="/api/v1/accounts/acc-001/transactions">GET /api/v1/accounts/{id}/transactions</option>
+                    </select>
+                    <button class="btn btn-primary" id="call-api" disabled>Call API</button>
+                    <div id="api-response" style="display: none;" class="code-block">
+                        <p>API Response:</p>
+                        <pre id="api-response-content"></pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Documentation Tab -->
+        <section id="docs-tab" class="tab-content">
+            <h2>Documentation</h2>
+            <p class="section-description">Learn how to integrate with our Open Banking APIs.</p>
+            
+            <div class="docs-grid">
+                <div class="doc-card">
+                    <h3>🚀 Getting Started</h3>
+                    <p>Quick start guide for integrating Open Banking APIs into your application.</p>
+                    <a href="/docs/oauth-authorization-flow.md" class="btn btn-link">Read Guide →</a>
+                </div>
+
+                <div class="doc-card">
+                    <h3>🔐 OAuth 2.0 Flow</h3>
+                    <p>Understand the OAuth authorization code flow and token management.</p>
+                    <a href="/docs/oauth-authorization-flow.md" class="btn btn-link">Learn More →</a>
+                </div>
+
+                <div class="doc-card">
+                    <h3>✅ Consent Management</h3>
+                    <p>How customer consent works and how to handle consent revocation.</p>
+                    <a href="/docs/consent-model.md" class="btn btn-link">View Details →</a>
+                </div>
+
+                <div class="doc-card">
+                    <h3>🔍 Scope Enforcement</h3>
+                    <p>Understanding OAuth scopes and API access control.</p>
+                    <a href="/docs/scope-enforcement.md" class="btn btn-link">Read More →</a>
+                </div>
+
+                <div class="doc-card">
+                    <h3>📊 Rate Limiting</h3>
+                    <p>API rate limits and best practices for handling 429 responses.</p>
+                    <a href="/docs/rate-limiting.md" class="btn btn-link">Learn More →</a>
+                </div>
+
+                <div class="doc-card">
+                    <h3>📝 Audit Logging</h3>
+                    <p>How authorization events are logged for compliance and security.</p>
+                    <a href="/docs/audit-logging.md" class="btn btn-link">View Details →</a>
+                </div>
+            </div>
+
+            <div class="code-example">
+                <h3>Example: Making an API Call</h3>
+                <pre><code>// Exchange authorization code for access token
+const tokenResponse = await fetch('/oauth/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    grant_type: 'authorization_code',
+    code: authorizationCode,
+    client_id: 'your_client_id',
+    client_secret: 'your_client_secret',
+    redirect_uri: 'http://localhost:3000/callback'
+  })
+});
+
+const { access_token } = await tokenResponse.json();
+
+// Call protected API
+const apiResponse = await fetch('/api/v1/accounts', {
+  headers: {
+    'Authorization': `Bearer ${access_token}`
+  }
+});
+
+const accounts = await apiResponse.json();
+console.log(accounts);</code></pre>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2024 IBM Open Banking Demo. Built with Bob.</p>
+        </div>
+    </footer>
+
+    <script src="portal.js"></script>
+</body>
+</html>
