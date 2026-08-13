@@ -4,6 +4,7 @@
  */
 
 const { verifyAccessToken } = require('../../auth/oauth/token-exchange');
+const { logDeniedRequest, DENIAL_REASONS } = require('./audit-logger');
 
 /**
  * In-memory cache for token introspection results
@@ -132,6 +133,7 @@ async function gatewayTokenIntrospection(req, res, next) {
     const authHeader = req.headers['authorization'];
     
     if (!authHeader) {
+      await logDeniedRequest(req, DENIAL_REASONS.MISSING_TOKEN, 401);
       return res.status(401).json({
         error: 'unauthorized',
         error_description: 'Authorization header required'
@@ -139,6 +141,7 @@ async function gatewayTokenIntrospection(req, res, next) {
     }
     
     if (!authHeader.startsWith('Bearer ')) {
+      await logDeniedRequest(req, DENIAL_REASONS.MISSING_TOKEN, 401);
       return res.status(401).json({
         error: 'unauthorized',
         error_description: 'Bearer token required'
@@ -148,6 +151,7 @@ async function gatewayTokenIntrospection(req, res, next) {
     const token = authHeader.substring(7);
     
     if (!token || token.trim() === '') {
+      await logDeniedRequest(req, DENIAL_REASONS.MISSING_TOKEN, 401);
       return res.status(401).json({
         error: 'unauthorized',
         error_description: 'Token cannot be empty'
@@ -158,6 +162,17 @@ async function gatewayTokenIntrospection(req, res, next) {
     const introspection = await introspectToken(token);
     
     if (!introspection.active) {
+      // Determine specific denial reason
+      let denialReason = DENIAL_REASONS.INVALID_TOKEN;
+      if (introspection.error === 'token_expired') {
+        denialReason = DENIAL_REASONS.EXPIRED_TOKEN;
+      }
+      
+      await logDeniedRequest(req, denialReason, 401, {
+        error: introspection.error,
+        error_description: introspection.error_description
+      });
+      
       return res.status(401).json({
         error: 'invalid_token',
         error_description: introspection.error_description || 'Token is not active'
@@ -178,6 +193,9 @@ async function gatewayTokenIntrospection(req, res, next) {
     
   } catch (error) {
     console.error('Gateway introspection error:', error);
+    await logDeniedRequest(req, DENIAL_REASONS.UNAUTHORIZED, 500, {
+      error: error.message
+    });
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to validate token'
@@ -265,6 +283,7 @@ function validateTokenFormatMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    await logDeniedRequest(req, DENIAL_REASONS.MISSING_TOKEN, 401);
     return res.status(401).json({
       error: 'unauthorized',
       error_description: 'Bearer token required'
@@ -275,6 +294,9 @@ function validateTokenFormatMiddleware(req, res, next) {
   const validation = validateTokenFormat(token);
   
   if (!validation.valid) {
+    await logDeniedRequest(req, DENIAL_REASONS.MALFORMED_TOKEN, 401, {
+      validation_error: validation.error
+    });
     return res.status(401).json({
       error: 'invalid_token',
       error_description: validation.error

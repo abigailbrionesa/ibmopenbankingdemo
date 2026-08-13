@@ -7,6 +7,7 @@
  */
 
 const { query } = require('../../data/db');
+const { logDeniedRequest, DENIAL_REASONS } = require('./audit-logger');
 
 /**
  * Validate consent status for API request
@@ -24,6 +25,7 @@ async function validateConsent(req, res, next) {
     const tokenPayload = req.oauth_token;
     
     if (!tokenPayload) {
+      await logDeniedRequest(req, DENIAL_REASONS.MISSING_TOKEN, 401);
       return res.status(401).json({
         error: 'unauthorized',
         error_description: 'No valid OAuth token found'
@@ -34,6 +36,7 @@ async function validateConsent(req, res, next) {
     
     if (!consent_id) {
       // Token doesn't have consent_id (legacy or malformed)
+      await logDeniedRequest(req, DENIAL_REASONS.MISSING_CONSENT, 403);
       return res.status(403).json({
         error: 'forbidden',
         error_description: 'Token is not associated with a consent'
@@ -49,6 +52,9 @@ async function validateConsent(req, res, next) {
     );
     
     if (consentResult.rows.length === 0) {
+      await logDeniedRequest(req, DENIAL_REASONS.MISSING_CONSENT, 403, {
+        consent_id: consent_id
+      });
       return res.status(403).json({
         error: 'forbidden',
         error_description: 'Consent not found',
@@ -60,6 +66,10 @@ async function validateConsent(req, res, next) {
     
     // Check consent status
     if (consent.status === 'revoked') {
+      await logDeniedRequest(req, DENIAL_REASONS.REVOKED_CONSENT, 403, {
+        consent_id: consent_id,
+        consent_status: 'revoked'
+      });
       return res.status(403).json({
         error: 'forbidden',
         error_description: 'Consent has been revoked',
@@ -69,6 +79,10 @@ async function validateConsent(req, res, next) {
     }
     
     if (consent.status === 'denied') {
+      await logDeniedRequest(req, DENIAL_REASONS.DENIED_CONSENT, 403, {
+        consent_id: consent_id,
+        consent_status: 'denied'
+      });
       return res.status(403).json({
         error: 'forbidden',
         error_description: 'Consent was denied',
@@ -78,6 +92,10 @@ async function validateConsent(req, res, next) {
     }
     
     if (consent.status === 'expired') {
+      await logDeniedRequest(req, DENIAL_REASONS.EXPIRED_CONSENT, 403, {
+        consent_id: consent_id,
+        consent_status: 'expired'
+      });
       return res.status(403).json({
         error: 'forbidden',
         error_description: 'Consent has expired',
@@ -87,6 +105,10 @@ async function validateConsent(req, res, next) {
     }
     
     if (consent.status !== 'approved') {
+      await logDeniedRequest(req, DENIAL_REASONS.MISSING_CONSENT, 403, {
+        consent_id: consent_id,
+        consent_status: consent.status
+      });
       return res.status(403).json({
         error: 'forbidden',
         error_description: `Consent is in ${consent.status} state`,
@@ -106,6 +128,11 @@ async function validateConsent(req, res, next) {
         ['expired', consent_id]
       );
       
+      await logDeniedRequest(req, DENIAL_REASONS.EXPIRED_CONSENT, 403, {
+        consent_id: consent_id,
+        expired_at: consent.expires_at
+      });
+      
       return res.status(403).json({
         error: 'forbidden',
         error_description: 'Consent has expired',
@@ -122,6 +149,12 @@ async function validateConsent(req, res, next) {
     const unauthorizedScopes = tokenScopes.filter(scope => !consentScopes.includes(scope));
     
     if (unauthorizedScopes.length > 0) {
+      await logDeniedRequest(req, DENIAL_REASONS.SCOPE_MISMATCH, 403, {
+        consent_id: consent_id,
+        unauthorized_scopes: unauthorizedScopes,
+        token_scopes: tokenScopes,
+        consent_scopes: consentScopes
+      });
       return res.status(403).json({
         error: 'forbidden',
         error_description: 'Token scopes exceed consent scopes',
@@ -137,6 +170,9 @@ async function validateConsent(req, res, next) {
     next();
   } catch (error) {
     console.error('Consent validation error:', error);
+    await logDeniedRequest(req, DENIAL_REASONS.UNAUTHORIZED, 500, {
+      error: error.message
+    });
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to validate consent'

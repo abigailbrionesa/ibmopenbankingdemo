@@ -12,6 +12,7 @@
 const { gatewayTokenIntrospection } = require('./token-introspection');
 const { validateConsent, requireConsentScope } = require('./consent-validation');
 const { enforceEndpointScopes, requireEndpointScope } = require('./scope-enforcement');
+const { auditAllowedRequest } = require('./audit-logger');
 
 /**
  * Complete authorization middleware chain
@@ -28,7 +29,8 @@ function completeAuthorization() {
   return [
     gatewayTokenIntrospection,  // Step 1: Validate token
     validateConsent,             // Step 2: Validate consent
-    enforceEndpointScopes        // Step 3: Validate scope
+    enforceEndpointScopes,       // Step 3: Validate scope
+    auditAllowedRequest          // Step 4: Log allowed request
   ];
 }
 
@@ -44,7 +46,8 @@ function completeAuthorizationWithScope(requiredScopes) {
     gatewayTokenIntrospection,           // Step 1: Validate token
     validateConsent,                      // Step 2: Validate consent
     requireEndpointScope(requiredScopes), // Step 3: Validate specific scope
-    requireConsentScope(Array.isArray(requiredScopes) ? requiredScopes[0] : requiredScopes) // Step 4: Validate consent has scope
+    requireConsentScope(Array.isArray(requiredScopes) ? requiredScopes[0] : requiredScopes), // Step 4: Validate consent has scope
+    auditAllowedRequest                   // Step 5: Log allowed request
   ];
 }
 
@@ -169,7 +172,8 @@ function completeAuthorizationWithLogging() {
     validateConsent,
     enforceEndpointScopes,
     attachAuthorizationSummary,
-    logAuthorization
+    logAuthorization,
+    auditAllowedRequest  // Add audit logging for allowed requests
   ];
 }
 

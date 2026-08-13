@@ -3,6 +3,8 @@
  * Maps OAuth scopes to API endpoints and enforces access control
  */
 
+const { logDeniedRequest, DENIAL_REASONS } = require('./audit-logger');
+
 /**
  * Scope definitions for Open Banking API
  */
@@ -132,7 +134,10 @@ function enforceEndpointScopes(req, res, next) {
     
     // Check if token has required scope
     if (!hasRequiredScope(tokenScopes, requiredScopes)) {
-      // Log denial event
+      // Store required scope for audit logging
+      req.required_scope = requiredScopes;
+      
+      // Log denial event (legacy console logging)
       logAuthorizationDenial({
         method: req.method,
         path: req.path,
@@ -143,6 +148,12 @@ function enforceEndpointScopes(req, res, next) {
         required_scopes: requiredScopes,
         ip_address: req.ip || req.connection.remoteAddress,
         user_agent: req.headers['user-agent']
+      });
+      
+      // Log to audit database
+      await logDeniedRequest(req, DENIAL_REASONS.INSUFFICIENT_SCOPE, 403, {
+        granted_scopes: tokenScopes,
+        required_scopes: requiredScopes
       });
       
       return res.status(403).json({
@@ -158,6 +169,9 @@ function enforceEndpointScopes(req, res, next) {
     
   } catch (error) {
     console.error('Scope enforcement error:', error);
+    await logDeniedRequest(req, DENIAL_REASONS.UNAUTHORIZED, 500, {
+      error: error.message
+    });
     res.status(500).json({
       error: 'server_error',
       error_description: 'Failed to enforce scope requirements'
@@ -186,7 +200,10 @@ function requireEndpointScope(requiredScopes) {
     const tokenScopes = req.oauth_token.scope ? req.oauth_token.scope.split(' ') : [];
     
     if (!hasRequiredScope(tokenScopes, scopes)) {
-      // Log denial
+      // Store required scope for audit logging
+      req.required_scope = scopes;
+      
+      // Log denial (legacy console logging)
       logAuthorizationDenial({
         method: req.method,
         path: req.path,
@@ -197,6 +214,12 @@ function requireEndpointScope(requiredScopes) {
         required_scopes: scopes,
         ip_address: req.ip || req.connection.remoteAddress,
         user_agent: req.headers['user-agent']
+      });
+      
+      // Log to audit database
+      await logDeniedRequest(req, DENIAL_REASONS.INSUFFICIENT_SCOPE, 403, {
+        granted_scopes: tokenScopes,
+        required_scopes: scopes
       });
       
       return res.status(403).json({
