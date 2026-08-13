@@ -15,6 +15,7 @@ This directory contains project documentation.
 
 ### Security & Authorization
 - [Audit Logging](./audit-logging.md) - Comprehensive audit trail for all authorization events
+- [Rate Limiting](./rate-limiting.md) - Per-client rate limiting and throttling
 - [Complete Authorization](./complete-authorization.md) - Full authorization flow implementation
 - [Consent Model](./consent-model.md) - Customer consent management
 - [Consent Revocation](./consent-revocation.md) - Consent revocation process

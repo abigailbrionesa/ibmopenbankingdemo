@@ -13,6 +13,7 @@ const { gatewayTokenIntrospection } = require('./token-introspection');
 const { validateConsent, requireConsentScope } = require('./consent-validation');
 const { enforceEndpointScopes, requireEndpointScope } = require('./scope-enforcement');
 const { auditAllowedRequest } = require('./audit-logger');
+const { rateLimitMiddleware } = require('./rate-limiter');
 
 /**
  * Complete authorization middleware chain
@@ -28,9 +29,10 @@ const { auditAllowedRequest } = require('./audit-logger');
 function completeAuthorization() {
   return [
     gatewayTokenIntrospection,  // Step 1: Validate token
-    validateConsent,             // Step 2: Validate consent
-    enforceEndpointScopes,       // Step 3: Validate scope
-    auditAllowedRequest          // Step 4: Log allowed request
+    rateLimitMiddleware,         // Step 2: Check rate limit
+    validateConsent,             // Step 3: Validate consent
+    enforceEndpointScopes,       // Step 4: Validate scope
+    auditAllowedRequest          // Step 5: Log allowed request
   ];
 }
 
@@ -44,10 +46,11 @@ function completeAuthorization() {
 function completeAuthorizationWithScope(requiredScopes) {
   return [
     gatewayTokenIntrospection,           // Step 1: Validate token
-    validateConsent,                      // Step 2: Validate consent
-    requireEndpointScope(requiredScopes), // Step 3: Validate specific scope
-    requireConsentScope(Array.isArray(requiredScopes) ? requiredScopes[0] : requiredScopes), // Step 4: Validate consent has scope
-    auditAllowedRequest                   // Step 5: Log allowed request
+    rateLimitMiddleware,                  // Step 2: Check rate limit
+    validateConsent,                      // Step 3: Validate consent
+    requireEndpointScope(requiredScopes), // Step 4: Validate specific scope
+    requireConsentScope(Array.isArray(requiredScopes) ? requiredScopes[0] : requiredScopes), // Step 5: Validate consent has scope
+    auditAllowedRequest                   // Step 6: Log allowed request
   ];
 }
 
@@ -169,6 +172,7 @@ function logAuthorization(req, res, next) {
 function completeAuthorizationWithLogging() {
   return [
     gatewayTokenIntrospection,
+    rateLimitMiddleware,
     validateConsent,
     enforceEndpointScopes,
     attachAuthorizationSummary,
@@ -257,6 +261,7 @@ function requireCompleteAuthorization(req, res, next) {
 function createAuthorizationChain(options = {}) {
   const {
     requireToken = true,
+    requireRateLimit = true,
     requireConsent = true,
     requireScope = true,
     explicitScope = null,
@@ -267,6 +272,10 @@ function createAuthorizationChain(options = {}) {
   
   if (requireToken) {
     chain.push(gatewayTokenIntrospection);
+  }
+  
+  if (requireRateLimit) {
+    chain.push(rateLimitMiddleware);
   }
   
   if (requireConsent) {
@@ -288,6 +297,9 @@ function createAuthorizationChain(options = {}) {
     chain.push(attachAuthorizationSummary);
     chain.push(logAuthorization);
   }
+  
+  // Always add audit logging at the end
+  chain.push(auditAllowedRequest);
   
   return chain;
 }

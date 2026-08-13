@@ -8,6 +8,35 @@ Gateway policies enforce security controls for protected API endpoints, includin
 
 ## Available Policies
 
+### Rate Limiting
+
+#### [`rate-limiter.js`](./rate-limiter.js)
+Per-client rate limiting to prevent abuse and ensure fair resource allocation.
+
+**Key Functions:**
+- `rateLimitMiddleware()` - Standard rate limiting middleware
+- `createRateLimiter(options)` - Create custom rate limiter
+- `getRateLimitStatus(clientId)` - Get rate limit status
+- `resetRateLimit(clientId)` - Reset rate limit for client
+- `getRateLimitStats()` - Get rate limiting statistics
+
+**Configuration:**
+- Default: 100 requests/minute/client
+- Test mode: 10 requests/10 seconds/client
+- Configurable via environment variables
+
+**Features:**
+- Per-client isolation (one client cannot affect others)
+- Sliding window algorithm for accurate limiting
+- Standard rate limit headers (X-RateLimit-*)
+- 429 Too Many Requests responses
+- Automatic audit logging of denials
+
+**Audit Integration:**
+- Logs denied requests with reason `rate_limit_exceeded`
+- Includes rate limit status in metadata
+- Tracks client_id for analysis
+
 ### Core Authorization Policies
 
 #### [`oauth-middleware.js`](./oauth-middleware.js)
@@ -64,6 +93,11 @@ Maps OAuth scopes to API endpoints and enforces access control.
 - Captures granted vs. required scope details
 - Stores required scope information for audit trail
 
+**Rate Limiting Integration:**
+- Rate limiting occurs after token validation
+- Before consent and scope checks
+- Ensures authenticated clients only
+
 #### [`complete-authorization.js`](./complete-authorization.js)
 Unified authorization middleware combining all checks.
 
@@ -78,6 +112,11 @@ Unified authorization middleware combining all checks.
 - Automatically logs all allowed requests after successful authorization
 - Integrates with all denial logging from upstream middleware
 - Provides authorization summary for audit context
+
+**Rate Limiting Integration:**
+- Rate limiting is included in all authorization chains
+- Applied after token validation, before consent checks
+- Can be disabled via `createAuthorizationChain({ requireRateLimit: false })`
 
 ### Audit Logging
 
@@ -175,7 +214,7 @@ console.log(`Allowed: ${stats.allowed_count}`);
 console.log(`Denied: ${stats.denied_count}`);
 ```
 
-## Authorization Flow with Audit Logging
+## Authorization Flow with Audit Logging and Rate Limiting
 
 ```
 1. Request arrives at gateway
@@ -186,19 +225,24 @@ console.log(`Denied: ${stats.denied_count}`);
    - Checks token expiration
    → DENIED: Logs with reason (invalid_token, expired_token, etc.)
    ↓
-3. Consent Validation (consent-validation.js)
+3. Rate Limiting (rate-limiter.js) ← NEW
+   - Checks request count for client
+   - Compares against configured limit
+   → DENIED: Returns 429, logs with reason (rate_limit_exceeded)
+   ↓
+4. Consent Validation (consent-validation.js)
    - Checks consent exists
    - Verifies consent is approved
    - Validates consent not expired
    - Checks consent not revoked
    → DENIED: Logs with reason (missing_consent, revoked_consent, etc.)
    ↓
-4. Scope Enforcement (scope-enforcement.js)
+5. Scope Enforcement (scope-enforcement.js)
    - Determines required scope for endpoint
    - Validates token has required scope
    → DENIED: Logs with reason (insufficient_scope)
    ↓
-5. Authorization Success
+6. Authorization Success
    - Logs allowed request with full context
    - Proceeds to route handler
 ```
@@ -277,6 +321,7 @@ npm test tests/integration/audit-logging.test.js
 ## Related Documentation
 
 - [Audit Logging](../../docs/audit-logging.md) - Comprehensive audit logging guide
+- [Rate Limiting](../../docs/rate-limiting.md) - Per-client rate limiting guide
 - [Complete Authorization](../../docs/complete-authorization.md) - Authorization flow
 - [Scope Enforcement](../../docs/scope-enforcement.md) - Scope validation
 - [Consent Model](../../docs/consent-model.md) - Consent management
