@@ -234,22 +234,25 @@
 
             <div class="code-example">
                 <h3>Example: Making an API Call</h3>
-                <pre><code>// Exchange authorization code for access token
-const tokenResponse = await fetch('/oauth/token', {
+                <div class="warning-box">
+                    <strong>Security Note:</strong> Never include client secrets in frontend code.
+                    This example shows the OAuth flow structure. In production, token exchange
+                    must happen server-side to protect your client secret.
+                </div>
+                <pre><code>
+// Server-side token exchange endpoint
+const tokenResponse = await fetch('/api/token-exchange', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    grant_type: 'authorization_code',
     code: authorizationCode,
-    client_id: 'your_client_id',
-    client_secret: 'your_client_secret',
-    redirect_uri: 'http://localhost:3000/callback'
+    // Client credentials handled securely on server
   })
 });
 
 const { access_token } = await tokenResponse.json();
 
-// Call protected API
+// Call protected API with access token
 const apiResponse = await fetch('/api/v1/accounts', {
   headers: {
     'Authorization': `Bearer ${access_token}`

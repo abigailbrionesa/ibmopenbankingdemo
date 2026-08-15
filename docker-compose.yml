@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -55,10 +53,11 @@ services:
     networks:
       - openbanking-network
     healthcheck:
-      test: ["CMD", "vault", "status"]
+      test: ["CMD", "sh", "-c", "VAULT_ADDR='http://127.0.0.1:8200' vault status"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   # Banking API Service
   banking-api:

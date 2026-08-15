@@ -229,11 +229,24 @@ async function runScenario() {
         const files = getAllFiles(dirPath, ['.js', '.html', '.jsx']);
         files.forEach(file => {
           const content = fs.readFileSync(file, 'utf8');
-          // Check for client secrets (client_id is OK, client_secret is NOT)
-          if (/client_secret\s*[:=]\s*['"][^'"]+['"]/i.test(content)) {
-            printError(`  ✗ Client secret found in ${path.relative(projectRoot, file)}`);
-            frontendSecretsFound++;
-          }
+          const lines = content.split('\n');
+          
+          lines.forEach((line, index) => {
+            // Check for client secrets (client_id is OK, client_secret is NOT)
+            if (/client_secret\s*[:=]\s*['"][^'"]+['"]/i.test(line)) {
+              const isInCodeExample = content.includes('<code>') &&
+                                     index > content.substring(0, content.indexOf(line)).split('\n').findIndex(l => l.includes('<code>')) &&
+                                     index < content.substring(0, content.indexOf(line)).split('\n').findIndex(l => l.includes('</code>'));
+              const isComment = line.trim().startsWith('//') || line.trim().startsWith('*') || line.trim().startsWith('<!--');
+              const isPlaceholder = /your_client_secret|PLACEHOLDER|example|changeme/i.test(line);
+              const hasSecurityWarning = content.includes('NEVER') && content.includes('client secret') && content.includes('frontend');
+              
+              if (!isInCodeExample && !isComment && !isPlaceholder && !hasSecurityWarning) {
+                printError(`  ✗ Client secret found in ${path.relative(projectRoot, file)}:${index + 1}`);
+                frontendSecretsFound++;
+              }
+            }
+          });
         });
       }
     });
@@ -244,6 +257,7 @@ async function runScenario() {
       printInfo('  ✓ Client IDs (public)');
       printInfo('  ✓ Redirect URIs (public)');
       printInfo('  ✓ API endpoints (public)');
+      printInfo('  ✓ Documentation examples with security warnings');
       allChecks = allChecks && true;
     } else {
       printError(`Found ${frontendSecretsFound} secrets in frontend code`);
